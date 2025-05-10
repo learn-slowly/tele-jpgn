@@ -237,26 +237,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.1
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.2
     help_text = """
-**jpgn_21_bot 사용법 안내**
+jpgn_21_bot 사용법 안내
 
-**정보 조회 (수동)**
+정보 조회 (수동)
 /today - 오늘 일정, 할 일, 날씨
 /tomorrow - 내일 일정, 할 일, 날씨
 /thisweek - 이번 주 일정 및 할 일
 /nextweek - 다음 주 일정 및 할 일
 
-**자동 알림 설정**
+자동 알림 설정
 /setmorningbriefingtime HH:MM - 아침 브리핑 시간 설정 (예: /setmorningbriefingtime 08:00)
 /seteveningbriefingtime HH:MM - 저녁 브리핑 시간 설정 (예: /seteveningbriefingtime 19:00)
 
-**연동 및 기타 설정**
+연동 및 기타 설정
 /connectgooglecalendar - 구글 캘린더 연동 (구현 예정)
 /connecttodoistproject - Todoist 프로젝트 연동 (구현 예정)
 /setweatherlocation 지역명 - 날씨 조회 지역 설정 (예: /setweatherlocation 서울특별시 강남구)
 
 문의사항은 관리자에게 연락해주세요.
 """
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(help_text)
 
 async def connect_google_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.3
     # TODO: OAuth2.0 연동 프로세스 구현 필요
@@ -312,12 +312,12 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # F
         todoist_info = await get_todoist_tasks("오늘")
         weather_info = await get_weather_forecast(DEFAULT_WEATHER_LOCATION)
         
-        response_text = f"**오늘의 정보**\n\n"
-        response_text += f"📅 **구글 캘린더**\n{calendar_info}\n\n"
-        response_text += f"📝 **Todoist**\n{todoist_info}\n\n"
-        response_text += f"🌦️ **날씨 ({DEFAULT_WEATHER_LOCATION})**\n{weather_info}"
+        response_text = f"오늘의 정보\n\n"
+        response_text += f"📅 구글 캘린더\n{calendar_info}\n\n"
+        response_text += f"📝 Todoist\n{todoist_info}\n\n"
+        response_text += f"🌦️ 날씨 ({DEFAULT_WEATHER_LOCATION})\n{weather_info}"
         
-        await update.message.reply_text(response_text, parse_mode='Markdown')
+        await update.message.reply_text(response_text)
     except Exception as e:
         logger.error(f"오늘 명령어 처리 중 오류: {e}")
         await update.message.reply_text(f"정보를 가져오는 중 오류가 발생했습니다: {str(e)}")
@@ -329,12 +329,12 @@ async def tomorrow_command(update: Update, context: ContextTypes.DEFAULT_TYPE): 
         # 내일 날씨는 보통 오늘의 날씨 정보에서 함께 제공되거나 별도 요청 필요
         weather_info = await get_weather_forecast(DEFAULT_WEATHER_LOCATION) # 일단 오늘 날씨로 대체, 추후 수정
         
-        response_text = f"**내일의 정보**\n\n"
-        response_text += f"📅 **구글 캘린더**\n{calendar_info}\n\n"
-        response_text += f"📝 **Todoist**\n{todoist_info}\n\n"
-        response_text += f"🌦️ **날씨 ({DEFAULT_WEATHER_LOCATION})**\n{weather_info}" # 내일 날씨로 수정 필요
+        response_text = f"내일의 정보\n\n"
+        response_text += f"📅 구글 캘린더\n{calendar_info}\n\n"
+        response_text += f"📝 Todoist\n{todoist_info}\n\n"
+        response_text += f"🌦️ 날씨 ({DEFAULT_WEATHER_LOCATION})\n{weather_info}" # 내일 날씨로 수정 필요
         
-        await update.message.reply_text(response_text, parse_mode='Markdown')
+        await update.message.reply_text(response_text)
     except Exception as e:
         logger.error(f"내일 명령어 처리 중 오류: {e}")
         await update.message.reply_text(f"정보를 가져오는 중 오류가 발생했습니다: {str(e)}")
@@ -344,11 +344,11 @@ async def this_week_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         calendar_info = await get_google_calendar_events("이번주")
         todoist_info = await get_todoist_tasks("이번주")
         
-        response_text = f"**이번 주 정보**\n\n"
-        response_text += f"📅 **구글 캘린더**\n{calendar_info}\n\n"
-        response_text += f"📝 **Todoist**\n{todoist_info}"
+        response_text = f"이번 주 정보\n\n"
+        response_text += f"📅 구글 캘린더\n{calendar_info}\n\n"
+        response_text += f"📝 Todoist\n{todoist_info}"
         
-        await update.message.reply_text(response_text, parse_mode='Markdown')
+        await update.message.reply_text(response_text)
     except Exception as e:
         logger.error(f"이번주 명령어 처리 중 오류: {e}")
         await update.message.reply_text(f"정보를 가져오는 중 오류가 발생했습니다: {str(e)}")
@@ -358,11 +358,11 @@ async def next_week_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         calendar_info = await get_google_calendar_events("다음주")
         todoist_info = await get_todoist_tasks("다음주")
         
-        response_text = f"**다음 주 정보**\n\n"
-        response_text += f"📅 **구글 캘린더**\n{calendar_info}\n\n"
-        response_text += f"📝 **Todoist**\n{todoist_info}"
+        response_text = f"다음 주 정보\n\n"
+        response_text += f"📅 구글 캘린더\n{calendar_info}\n\n"
+        response_text += f"📝 Todoist\n{todoist_info}"
         
-        await update.message.reply_text(response_text, parse_mode='Markdown')
+        await update.message.reply_text(response_text)
     except Exception as e:
         logger.error(f"다음주 명령어 처리 중 오류: {e}")
         await update.message.reply_text(f"정보를 가져오는 중 오류가 발생했습니다: {str(e)}")
