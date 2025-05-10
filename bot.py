@@ -249,66 +249,11 @@ jpgn_21_bot 사용법 안내
 /thisweek - 이번 주 일정 및 할 일
 /nextweek - 다음 주 일정 및 할 일
 
-자동 알림 설정
-/setmorningbriefingtime HH:MM - 아침 브리핑 시간 설정 (예: /setmorningbriefingtime 08:00)
-/seteveningbriefingtime HH:MM - 저녁 브리핑 시간 설정 (예: /seteveningbriefingtime 19:00)
-
-연동 및 기타 설정
-/connectgooglecalendar - 구글 캘린더 연동 (구현 예정)
-/connecttodoistproject - Todoist 프로젝트 연동 (구현 예정)
-/setweatherlocation 지역명 - 날씨 조회 지역 설정 (예: /setweatherlocation 서울특별시 강남구)
+매일 아침 08:00와 저녁 20:00에 자동으로 일정 브리핑이 제공됩니다.
 
 문의사항은 관리자에게 연락해주세요.
 """
     await update.message.reply_text(help_text)
-
-async def connect_google_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.3
-    # TODO: OAuth2.0 연동 프로세스 구현 필요
-    await update.message.reply_text("구글 캘린더 연동 기능은 현재 준비 중입니다. (대상 캘린더 ID: {})".format(GOOGLE_CALENDAR_ID))
-
-async def connect_todoist_project(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.4
-    # TODO: Todoist API 연동 확인 로직 (토큰 유효성 등)
-    await update.message.reply_text("Todoist 연동 기능은 현재 준비 중입니다. (대상 프로젝트: {})".format("PRD에 명시된 URL의 프로젝트")) # URL 직접 노출보다 설명으로 대체
-
-async def set_weather_location(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.5
-    global DEFAULT_WEATHER_LOCATION # 실제 운영 시에는 DB나 파일에 사용자별/팀별 설정을 저장해야 함
-    try:
-        location = " ".join(context.args)
-        if not location:
-            await update.message.reply_text("지역명을 입력해주세요. 예: /setweatherlocation 서울특별시 강남구")
-            return
-        DEFAULT_WEATHER_LOCATION = location
-        await update.message.reply_text(f"기본 날씨 조회 지역이 '{location}'으로 설정되었습니다.")
-        logger.info(f"날씨 지역 변경: {location}")
-    except (IndexError, ValueError):
-        await update.message.reply_text("사용법: /setweatherlocation [지역명]")
-
-async def set_morning_briefing_time(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.6
-    # TODO: 알림 시간 설정 로직 및 스케줄러 연동 (apscheduler 등)
-    try:
-        time_str = context.args[0]
-        # 간단한 시간 형식 검증 (HH:MM) - 실제로는 더 엄밀한 검증 필요
-        if len(time_str) == 5 and time_str[2] == ':':
-            # context.job_queue.run_daily(...) 등으로 스케줄링
-            await update.message.reply_text(f"아침 브리핑 시간이 '{time_str}'으로 설정되었습니다. (스케줄링 기능 구현 필요)")
-            logger.info(f"아침 브리핑 시간 설정: {time_str}")
-        else:
-            raise ValueError
-    except (IndexError, ValueError):
-        await update.message.reply_text("사용법: /setmorningbriefingtime HH:MM (예: 08:00)")
-
-
-async def set_evening_briefing_time(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.7
-    # TODO: 알림 시간 설정 로직 및 스케줄러 연동
-    try:
-        time_str = context.args[0]
-        if len(time_str) == 5 and time_str[2] == ':':
-            await update.message.reply_text(f"저녁 브리핑 시간이 '{time_str}'으로 설정되었습니다. (스케줄링 기능 구현 필요)")
-            logger.info(f"저녁 브리핑 시간 설정: {time_str}")
-        else:
-            raise ValueError
-    except (IndexError, ValueError):
-        await update.message.reply_text("사용법: /seteveningbriefingtime HH:MM (예: 19:00)")
 
 async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.8
     try:
@@ -374,17 +319,94 @@ async def next_week_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- 자동 알림 함수 (FR4) ---
 async def morning_briefing(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
-    # TODO: 실제 브리핑 내용 생성 로직 (오늘의 정보 요약)
-    # 특정 chat_id로 메시지 보내기 (봇을 사용하는 그룹/사용자 ID를 알아야 함)
-    # 이 부분은 사용자가 봇과 상호작용한 후 chat_id를 저장하는 로직이 필요합니다.
-    # 여기서는 임시로 logger에만 출력합니다.
-    logger.info(f"아침 브리핑 실행 시간입니다. (Chat ID: {job.chat_id if job else 'N/A'})")
-    # await context.bot.send_message(chat_id=job.chat_id, text="굿모닝! 오늘의 브리핑입니다...")
+    try:
+        # 오늘의 정보 요약 생성
+        calendar_info = await get_google_calendar_events("오늘")
+        todoist_info = await get_todoist_tasks("오늘")
+        weather_info = await get_weather_forecast(DEFAULT_WEATHER_LOCATION)
+        
+        briefing_text = f"[아침 브리핑] 오늘의 정보\n\n"
+        briefing_text += f"📅 구글 캘린더\n{calendar_info}\n\n"
+        briefing_text += f"📝 Todoist\n{todoist_info}\n\n"
+        briefing_text += f"🌦️ 날씨 ({DEFAULT_WEATHER_LOCATION})\n{weather_info}"
+        
+        # 저장된 채팅 ID로 메시지 전송
+        await context.bot.send_message(chat_id=job.chat_id, text=briefing_text)
+        logger.info(f"아침 브리핑 전송 완료 (Chat ID: {job.chat_id})")
+    except Exception as e:
+        logger.error(f"아침 브리핑 생성 중 오류 발생: {e}")
 
 async def evening_briefing(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
-    logger.info(f"저녁 브리핑 실행 시간입니다. (Chat ID: {job.chat_id if job else 'N/A'})")
-    # await context.bot.send_message(chat_id=job.chat_id, text="오늘 하루도 수고하셨습니다! 내일 일정 브리핑입니다...")
+    try:
+        # 내일의 정보 요약 생성
+        calendar_info = await get_google_calendar_events("내일")
+        todoist_info = await get_todoist_tasks("내일")
+        weather_info = await get_weather_forecast(DEFAULT_WEATHER_LOCATION)
+        
+        briefing_text = f"[저녁 브리핑] 내일의 정보\n\n"
+        briefing_text += f"📅 구글 캘린더\n{calendar_info}\n\n"
+        briefing_text += f"📝 Todoist\n{todoist_info}\n\n"
+        briefing_text += f"🌦️ 날씨 ({DEFAULT_WEATHER_LOCATION})\n{weather_info}"
+        
+        # 저장된 채팅 ID로 메시지 전송
+        await context.bot.send_message(chat_id=job.chat_id, text=briefing_text)
+        logger.info(f"저녁 브리핑 전송 완료 (Chat ID: {job.chat_id})")
+    except Exception as e:
+        logger.error(f"저녁 브리핑 생성 중 오류 발생: {e}")
+
+# 새로운 채팅방에 추가될 때 자동으로 채팅 ID 저장
+async def new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
+    chat_id = update.effective_chat.id
+    
+    for member in update.message.new_chat_members:
+        if member.id == bot.id:
+            logger.info(f"봇이 새 채팅방에 추가됨: {chat_id}")
+            
+            # 이 채팅방에 아침, 저녁 브리핑 일정 추가
+            add_briefing_schedule(context.job_queue, chat_id)
+            
+            await update.message.reply_text(
+                "안녕하세요! jpgn_21_bot입니다.\n"
+                "팀의 일정과 할 일을 관리하고 날씨 정보를 알려드립니다.\n"
+                "매일 아침 08:00와 저녁 20:00에 자동으로 브리핑이 제공됩니다.\n"
+                "사용 가능한 명령어는 /help 를 입력하여 확인하세요."
+            )
+
+# 브리핑 스케줄 설정 함수
+def add_briefing_schedule(job_queue, chat_id):
+    # 기존 일정이 있으면 제거
+    current_jobs = job_queue.get_jobs_by_name(f"morning_briefing_{chat_id}")
+    for job in current_jobs:
+        job.schedule_removal()
+    
+    current_jobs = job_queue.get_jobs_by_name(f"evening_briefing_{chat_id}")
+    for job in current_jobs:
+        job.schedule_removal()
+    
+    # 한국 시간대 설정
+    korea_tz = pytz.timezone('Asia/Seoul')
+    
+    # 아침 브리핑 (08:00)
+    morning_time = datetime.time(hour=8, minute=0, tzinfo=korea_tz)
+    job_queue.run_daily(
+        morning_briefing, 
+        time=morning_time, 
+        chat_id=chat_id,
+        name=f"morning_briefing_{chat_id}"
+    )
+    logger.info(f"아침 브리핑 일정 추가됨 (08:00, Chat ID: {chat_id})")
+    
+    # 저녁 브리핑 (20:00)
+    evening_time = datetime.time(hour=20, minute=0, tzinfo=korea_tz)
+    job_queue.run_daily(
+        evening_briefing, 
+        time=evening_time, 
+        chat_id=chat_id,
+        name=f"evening_briefing_{chat_id}"
+    )
+    logger.info(f"저녁 브리핑 일정 추가됨 (20:00, Chat ID: {chat_id})")
 
 def main() -> None:
     """봇을 시작합니다."""
@@ -393,20 +415,26 @@ def main() -> None:
     # 명령어 핸들러 등록
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("connectgooglecalendar", connect_google_calendar))
-    application.add_handler(CommandHandler("connecttodoistproject", connect_todoist_project))
-    application.add_handler(CommandHandler("setweatherlocation", set_weather_location))
-    application.add_handler(CommandHandler("setmorningbriefingtime", set_morning_briefing_time))
-    application.add_handler(CommandHandler("seteveningbriefingtime", set_evening_briefing_time))
     application.add_handler(CommandHandler("today", today_command))
     application.add_handler(CommandHandler("tomorrow", tomorrow_command))
     application.add_handler(CommandHandler("thisweek", this_week_command))
     application.add_handler(CommandHandler("nextweek", next_week_command))
+    
+    # 새 채팅방에 추가될 때 이벤트 핸들러
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
 
-    # 자동 알림 (Job Queue 사용 예시 - 실제 구현 시 chat_id 관리 및 정확한 시간 설정 필요)
-    # job_queue = application.job_queue
-    # job_queue.run_daily(morning_briefing, time=datetime.time(hour=8, minute=0, tzinfo=pytz.timezone('Asia/Seoul')), chat_id=TARGET_CHAT_ID) # TARGET_CHAT_ID 설정 필요
-    # job_queue.run_daily(evening_briefing, time=datetime.time(hour=21, minute=0, tzinfo=pytz.timezone('Asia/Seoul')), chat_id=TARGET_CHAT_ID)
+    # 이미 작동 중인 채팅방에 대한 브리핑 설정
+    # 실제 운영 시에는 DB에서 저장된 채팅 ID 목록을 불러와야 함
+    # 여기서는 예시로 특정 채팅 ID 사용
+    chat_ids = []
+    if 'TELEGRAM_CHAT_IDS' in os.environ:
+        chat_ids_str = os.environ.get('TELEGRAM_CHAT_IDS', '')
+        if chat_ids_str:
+            chat_ids = [int(chat_id.strip()) for chat_id in chat_ids_str.split(',') if chat_id.strip()]
+    
+    job_queue = application.job_queue
+    for chat_id in chat_ids:
+        add_briefing_schedule(job_queue, chat_id)
 
     logger.info("봇 시작 중...")
     application.run_polling()
