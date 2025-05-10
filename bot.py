@@ -161,53 +161,189 @@ async def get_todoist_tasks(date_type: str):
     korea_tz = pytz.timezone('Asia/Seoul')
     now = datetime.datetime.now(korea_tz)
     
-    # 날짜 설정 및 필터 구성
-    if date_type == "오늘":
-        if TODOIST_PROJECT_ID:
-            filter_param = f"today & project_id:{TODOIST_PROJECT_ID}"
-        else:
-            filter_param = "today"
-        title = "오늘"
-    elif date_type == "내일":
-        if TODOIST_PROJECT_ID:
-            filter_param = f"tomorrow & project_id:{TODOIST_PROJECT_ID}"
-        else:
-            filter_param = "tomorrow"
-        title = "내일"
-    elif date_type == "이번주":
-        # 주간 필터는 문법이 복잡해서 다른 방식으로 처리
-        end_date = (now + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        if TODOIST_PROJECT_ID:
-            filter_param = f"(due:today | due:>today due:before {end_date}) & project_id:{TODOIST_PROJECT_ID}"
-        else:
-            filter_param = f"due:today | due:>today due:before {end_date}"
-        title = "이번 주"
-    elif date_type == "다음주":
-        next_week_start = now + datetime.timedelta(days=7-now.weekday())
-        next_week_end = next_week_start + datetime.timedelta(days=6)
-        if TODOIST_PROJECT_ID:
-            filter_param = f"(due:>={next_week_start.strftime('%Y-%m-%d')} & due:<={next_week_end.strftime('%Y-%m-%d')}) & project_id:{TODOIST_PROJECT_ID}"
-        else:
-            filter_param = f"due:>={next_week_start.strftime('%Y-%m-%d')} & due:<={next_week_end.strftime('%Y-%m-%d')}"
-        title = "다음 주"
-    else:
-        return "알 수 없는 기간입니다."
-    
+    # 최대한 단순한 필터 사용하기
     try:
-        logger.info(f"Todoist 작업 정보 요청: {date_type} (필터: {filter_param})")
-        
-        # Todoist API를 호출하여 작업 목록 가져오기
-        response = requests.get(
-            f"{TODOIST_API_URL}",
-            headers=headers,
-            params={"filter": filter_param}
-        )
-        
-        if response.status_code != 200:
-            logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
-            return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
-        
-        tasks = response.json()
+        if date_type == "오늘":
+            # 프로젝트 ID가 있으면 해당 프로젝트의 오늘 마감 작업만 필터링
+            if TODOIST_PROJECT_ID:
+                # REST API를 통해 모든 작업을 가져온 후 수동으로 필터링
+                response = requests.get(TODOIST_API_URL, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                all_tasks = response.json()
+                
+                # 프로젝트 ID와 마감일 기준으로 수동 필터링
+                today_str = now.strftime("%Y-%m-%d")
+                filtered_tasks = []
+                
+                for task in all_tasks:
+                    # 프로젝트 ID 일치 여부 확인
+                    if str(task.get('project_id', '')) != TODOIST_PROJECT_ID:
+                        continue
+                    
+                    # 마감일 확인
+                    due = task.get('due', {})
+                    if due and 'date' in due:
+                        due_date = due['date'].split('T')[0]  # 시간 부분 제거
+                        if due_date == today_str:
+                            filtered_tasks.append(task)
+                
+                tasks = filtered_tasks
+            else:
+                # 프로젝트 ID가 없으면 간단한 필터 사용
+                response = requests.get(
+                    TODOIST_API_URL,
+                    headers=headers,
+                    params={"filter": "today"}
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                tasks = response.json()
+            
+            title = "오늘"
+            
+        elif date_type == "내일":
+            # 내일에 대해서도 동일한 로직 적용
+            tomorrow = now + datetime.timedelta(days=1)
+            tomorrow_str = tomorrow.strftime("%Y-%m-%d")
+            
+            if TODOIST_PROJECT_ID:
+                response = requests.get(TODOIST_API_URL, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                all_tasks = response.json()
+                filtered_tasks = []
+                
+                for task in all_tasks:
+                    if str(task.get('project_id', '')) != TODOIST_PROJECT_ID:
+                        continue
+                    
+                    due = task.get('due', {})
+                    if due and 'date' in due:
+                        due_date = due['date'].split('T')[0]
+                        if due_date == tomorrow_str:
+                            filtered_tasks.append(task)
+                
+                tasks = filtered_tasks
+            else:
+                response = requests.get(
+                    TODOIST_API_URL,
+                    headers=headers,
+                    params={"filter": "tomorrow"}
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                tasks = response.json()
+            
+            title = "내일"
+            
+        elif date_type == "이번주":
+            # 이번 주에 대해서도 수동 필터링 적용
+            today_str = now.strftime("%Y-%m-%d")
+            end_of_week = now + datetime.timedelta(days=7-now.weekday())
+            end_of_week_str = end_of_week.strftime("%Y-%m-%d")
+            
+            if TODOIST_PROJECT_ID:
+                response = requests.get(TODOIST_API_URL, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                all_tasks = response.json()
+                filtered_tasks = []
+                
+                for task in all_tasks:
+                    if str(task.get('project_id', '')) != TODOIST_PROJECT_ID:
+                        continue
+                    
+                    due = task.get('due', {})
+                    if due and 'date' in due:
+                        due_date = due['date'].split('T')[0]
+                        if today_str <= due_date <= end_of_week_str:
+                            filtered_tasks.append(task)
+                
+                tasks = filtered_tasks
+            else:
+                # 간단한 일주일 필터
+                response = requests.get(
+                    TODOIST_API_URL,
+                    headers=headers,
+                    params={"filter": "7 days"}
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                tasks = response.json()
+            
+            title = "이번 주"
+            
+        elif date_type == "다음주":
+            # 다음 주에 대해서도 수동 필터링 적용
+            next_week_start = now + datetime.timedelta(days=7-now.weekday())
+            next_week_start_str = next_week_start.strftime("%Y-%m-%d")
+            next_week_end = next_week_start + datetime.timedelta(days=6)
+            next_week_end_str = next_week_end.strftime("%Y-%m-%d")
+            
+            if TODOIST_PROJECT_ID:
+                response = requests.get(TODOIST_API_URL, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                all_tasks = response.json()
+                filtered_tasks = []
+                
+                for task in all_tasks:
+                    if str(task.get('project_id', '')) != TODOIST_PROJECT_ID:
+                        continue
+                    
+                    due = task.get('due', {})
+                    if due and 'date' in due:
+                        due_date = due['date'].split('T')[0]
+                        if next_week_start_str <= due_date <= next_week_end_str:
+                            filtered_tasks.append(task)
+                
+                tasks = filtered_tasks
+            else:
+                # 직접 API 필터링은 복잡해서 모든 작업을 가져와서 수동으로 필터링
+                response = requests.get(TODOIST_API_URL, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+                    return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+                
+                all_tasks = response.json()
+                filtered_tasks = []
+                
+                for task in all_tasks:
+                    due = task.get('due', {})
+                    if due and 'date' in due:
+                        due_date = due['date'].split('T')[0]
+                        if next_week_start_str <= due_date <= next_week_end_str:
+                            filtered_tasks.append(task)
+                
+                tasks = filtered_tasks
+            
+            title = "다음 주"
+            
+        else:
+            return "알 수 없는 기간입니다."
         
         if not tasks:
             return f"{title} 예정된 작업이 없습니다."
@@ -277,34 +413,17 @@ async def get_weather_forecast(location: str):
         base_date = now.strftime("%Y%m%d")  # 오늘 날짜 YYYYMMDD 형식
         
         # 현재 시간에 따라 기준 시간 설정 (API 요구사항)
-        if now.hour < 2 or (now.hour == 2 and now.minute < 10):
-            # 00:00~02:10 이전은 전날 23시 데이터 사용
+        # 더 간단히 고정 기준 시간 사용
+        if now.hour < 6:
             base_time = "2300"
+            # 전날 23시 데이터 사용
             base_date = (now - datetime.timedelta(days=1)).strftime("%Y%m%d")
-        elif now.hour < 5 or (now.hour == 5 and now.minute < 10):
-            # 02:10~05:10 이전은 당일 02시 데이터 사용
-            base_time = "0200"
-        elif now.hour < 8 or (now.hour == 8 and now.minute < 10):
-            # 05:10~08:10 이전은 당일 05시 데이터 사용
-            base_time = "0500"
-        elif now.hour < 11 or (now.hour == 11 and now.minute < 10):
-            # 08:10~11:10 이전은 당일 08시 데이터 사용
-            base_time = "0800"
-        elif now.hour < 14 or (now.hour == 14 and now.minute < 10):
-            # 11:10~14:10 이전은 당일 11시 데이터 사용
-            base_time = "1100"
-        elif now.hour < 17 or (now.hour == 17 and now.minute < 10):
-            # 14:10~17:10 이전은 당일 14시 데이터 사용
-            base_time = "1400"
-        elif now.hour < 20 or (now.hour == 20 and now.minute < 10):
-            # 17:10~20:10 이전은 당일 17시 데이터 사용
-            base_time = "1700"
-        elif now.hour < 23 or (now.hour == 23 and now.minute < 10):
-            # 20:10~23:10 이전은 당일 20시 데이터 사용
-            base_time = "2000"
+        elif now.hour < 12:
+            base_time = "0500"  # 오전에는 0500 데이터 사용
+        elif now.hour < 18:
+            base_time = "1100"  # 오후에는 1100 데이터 사용
         else:
-            # 23:10~24:00은 당일 23시 데이터 사용
-            base_time = "2300"
+            base_time = "1700"  # 밤에는 1700 데이터 사용
         
         logger.info(f"날씨 정보 요청: {location} (좌표: {coords}, 기준일시: {base_date} {base_time})")
         
@@ -330,13 +449,14 @@ async def get_weather_forecast(location: str):
         # 응답 데이터 분석
         try:
             data = response.json()
-            if data['response']['header']['resultCode'] != '00':
-                return f"날씨 정보를 가져오는 중 오류가 발생했습니다: {data['response']['header']['resultMsg']}"
+            if 'response' not in data or 'header' not in data['response'] or 'body' not in data['response'] or data['response']['header']['resultCode'] != '00':
+                logger.error(f"날씨 API 응답 구조 오류: {data}")
+                return f"날씨 정보 응답 구조가 예상과 다릅니다."
             
             items = data['response']['body']['items']['item']
             
             # 날씨 정보 정리
-            weather_data = {}
+            today_date = now.strftime("%Y%m%d")  # 오늘 날짜
             forecast_date = (now + datetime.timedelta(days=1)).strftime("%Y%m%d")  # 내일 날짜
             
             # 오늘과 내일의 데이터로 분류
@@ -344,7 +464,7 @@ async def get_weather_forecast(location: str):
             tomorrow_data = {}
             
             for item in items:
-                if item['fcstDate'] == base_date:  # 오늘
+                if item['fcstDate'] == today_date:  # 오늘
                     if item['fcstTime'] not in today_data:
                         today_data[item['fcstTime']] = {}
                     today_data[item['fcstTime']][item['category']] = item['fcstValue']
@@ -358,38 +478,47 @@ async def get_weather_forecast(location: str):
             
             # 오늘 날씨
             result += "🌡️ 오늘 날씨\n"
-            today_times = ["0900", "1200", "1500", "1800", "2100"]  # 주요 시간대
-            for time in today_times:
-                if time in today_data:
-                    temp = today_data[time].get('TMP', '-')  # 기온
-                    sky = today_data[time].get('SKY', '-')   # 하늘상태
-                    pty = today_data[time].get('PTY', '0')   # 강수형태
-                    pop = today_data[time].get('POP', '0')   # 강수확률
-                    
-                    # 하늘상태 변환
-                    sky_text = "맑음" if sky == '1' else "구름많음" if sky == '3' else "흐림" if sky == '4' else "알 수 없음"
-                    
-                    # 강수형태 변환
-                    if pty == '1':
-                        weather_text = "비"
-                    elif pty == '2':
-                        weather_text = "비/눈"
-                    elif pty == '3':
-                        weather_text = "눈"
-                    elif pty == '4':
-                        weather_text = "소나기"
-                    else:
-                        weather_text = sky_text
-                    
-                    # 이모지 추가
-                    weather_emoji = WEATHER_DESCRIPTION.get(weather_text, weather_text)
-                    
-                    time_formatted = f"{time[:2]}:{time[2:]}"
-                    result += f"• {time_formatted}: {weather_emoji}, {temp}°C, 강수확률 {pop}%\n"
+            # 현재 시간 이후의 시간대만 필터링
+            current_hour = now.hour
+            today_times = ["0900", "1200", "1500", "1800", "2100"]
+            filtered_today_times = [t for t in today_times if int(t[:2]) > current_hour or (int(t[:2]) == current_hour and int(t[2:]) > now.minute)]
+            
+            # 오늘 날씨 데이터 처리
+            if today_data and filtered_today_times:
+                for time in filtered_today_times:
+                    if time in today_data:
+                        temp = today_data[time].get('TMP', '-')  # 기온
+                        sky = today_data[time].get('SKY', '-')   # 하늘상태
+                        pty = today_data[time].get('PTY', '0')   # 강수형태
+                        pop = today_data[time].get('POP', '0')   # 강수확률
+                        
+                        # 하늘상태 변환
+                        sky_text = "맑음" if sky == '1' else "구름많음" if sky == '3' else "흐림" if sky == '4' else "알 수 없음"
+                        
+                        # 강수형태 변환
+                        if pty == '1':
+                            weather_text = "비"
+                        elif pty == '2':
+                            weather_text = "비/눈"
+                        elif pty == '3':
+                            weather_text = "눈"
+                        elif pty == '4':
+                            weather_text = "소나기"
+                        else:
+                            weather_text = sky_text
+                        
+                        # 이모지 추가
+                        weather_emoji = WEATHER_DESCRIPTION.get(weather_text, weather_text)
+                        
+                        time_formatted = f"{time[:2]}:{time[2:]}"
+                        result += f"• {time_formatted}: {weather_emoji}, {temp}°C, 강수확률 {pop}%\n"
+            else:
+                result += "오늘 남은 시간의 날씨 정보가 없습니다.\n"
             
             # 내일 날씨
             result += "\n🌡️ 내일 날씨\n"
             tomorrow_times = ["0900", "1200", "1500", "1800", "2100"]  # 주요 시간대
+            
             for time in tomorrow_times:
                 if time in tomorrow_data:
                     temp = tomorrow_data[time].get('TMP', '-')  # 기온
