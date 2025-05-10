@@ -2,6 +2,10 @@ import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 import os # 추가
+import datetime
+import pytz
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 # PRD에서 가져온 API 키 및 설정값 (Heroku Config Vars 사용 권장)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -11,6 +15,7 @@ GOOGLE_CALENDAR_ID = os.environ.get("GOOGLE_CALENDAR_ID", "anVzdGljZWt5dW5nbmFtQ
 WEATHER_API_URL = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0" # 고정값
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
 DEFAULT_WEATHER_LOCATION = os.environ.get("DEFAULT_WEATHER_LOCATION", "경상남도 창원시 성산구") # 기본값 설정 가능
+GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")  # 서비스 계정 JSON 내용
 
 # 로깅 설정
 logging.basicConfig(
@@ -25,19 +30,119 @@ if not all([TELEGRAM_BOT_TOKEN, TODOIST_API_TOKEN, WEATHER_API_KEY]):
     # 적절한 종료 또는 오류 처리 로직
     exit() # 예시: 프로그램 종료
 
+# Google Calendar API 설정
+def get_calendar_service():
+    if not GOOGLE_CREDENTIALS_JSON:
+        logger.error("Google Calendar API 자격 증명이 설정되지 않았습니다.")
+        return None
+    
+    try:
+        # 환경 변수에서 가져온 JSON 문자열을 임시 파일로 저장
+        import json
+        import tempfile
+        
+        credentials_info = json.loads(GOOGLE_CREDENTIALS_JSON)
+        
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp:
+            json.dump(credentials_info, temp)
+            temp_filename = temp.name
+        
+        # 서비스 계정 인증 정보 생성
+        credentials = service_account.Credentials.from_service_account_file(
+            temp_filename, 
+            scopes=['https://www.googleapis.com/auth/calendar.readonly']
+        )
+        
+        # 임시 파일 삭제
+        os.unlink(temp_filename)
+        
+        # Calendar API 서비스 생성
+        service = build('calendar', 'v3', credentials=credentials)
+        return service
+    
+    except Exception as e:
+        logger.error(f"Google Calendar API 서비스 생성 중 오류 발생: {e}")
+        return None
+
 # --- 서비스 연동 함수 (나중에 구현) ---
 async def get_google_calendar_events(date_type: str):
-    # TODO: 구글 캘린더 API 연동 로직 구현 (FR1)
-    logger.info(f"구글 캘린더 정보 요청: {date_type}")
+    service = get_calendar_service()
+    if not service:
+        return "구글 캘린더 연동에 실패했습니다. 관리자에게 문의하세요."
+    
+    # 한국 시간대 설정
+    korea_tz = pytz.timezone('Asia/Seoul')
+    now = datetime.datetime.now(korea_tz)
+    
+    # 요청된 날짜 범위에 따라 시작/종료 시간 설정
     if date_type == "오늘":
-        return f"[임시] 오늘의 구글 캘린더 일정입니다."
+        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        title = "오늘"
     elif date_type == "내일":
-        return f"[임시] 내일의 구글 캘린더 일정입니다."
+        tomorrow = now + datetime.timedelta(days=1)
+        start_time = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = tomorrow.replace(hour=23, minute=59, second=59, microsecond=999999)
+        title = "내일"
     elif date_type == "이번주":
-        return f"[임시] 이번 주 구글 캘린더 일정입니다."
+        # 이번 주 월요일을 찾습니다
+        start_time = now - datetime.timedelta(days=now.weekday())
+        start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        # 이번 주 일요일 (월요일 + 6일)
+        end_time = start_time + datetime.timedelta(days=6)
+        end_time = end_time.replace(hour=23, minute=59, second=59, microsecond=999999)
+        title = "이번 주"
     elif date_type == "다음주":
-        return f"[임시] 다음 주 구글 캘린더 일정입니다."
-    return "알 수 없는 기간입니다."
+        # 다음 주 월요일 (이번 주 월요일 + 7일)
+        next_monday = now - datetime.timedelta(days=now.weekday()) + datetime.timedelta(days=7)
+        start_time = next_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        # 다음 주 일요일 (다음 주 월요일 + 6일)
+        end_time = start_time + datetime.timedelta(days=6)
+        end_time = end_time.replace(hour=23, minute=59, second=59, microsecond=999999)
+        title = "다음 주"
+    else:
+        return "알 수 없는 기간입니다."
+    
+    # 시간을 ISO 형식으로 변환
+    start_time_iso = start_time.isoformat()
+    end_time_iso = end_time.isoformat()
+    
+    try:
+        logger.info(f"구글 캘린더 정보 요청: {date_type} ({start_time_iso} ~ {end_time_iso})")
+        
+        # 이벤트 검색 실행
+        events_result = service.events().list(
+            calendarId=GOOGLE_CALENDAR_ID,
+            timeMin=start_time_iso,
+            timeMax=end_time_iso,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        
+        if not events:
+            return f"{title}의 일정이 없습니다."
+        
+        # 이벤트 정보 포맷팅
+        event_list = []
+        for event in events:
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            
+            # 날짜 또는 시간 파싱
+            if 'T' in start:  # 날짜와 시간이 모두 있는 경우 (dateTime)
+                event_start = datetime.datetime.fromisoformat(start.replace('Z', '+00:00')).astimezone(korea_tz)
+                start_str = event_start.strftime('%Y-%m-%d %H:%M')
+            else:  # 종일 이벤트인 경우 (date)
+                start_str = start
+            
+            event_list.append(f"• {start_str}: {event['summary']}")
+        
+        return "\n".join(event_list)
+    
+    except Exception as e:
+        logger.error(f"구글 캘린더 이벤트 조회 중 오류 발생: {e}")
+        return f"구글 캘린더 정보를 가져오는 중 오류가 발생했습니다: {str(e)}"
 
 async def get_todoist_tasks(date_type: str):
     # TODO: Todoist API 연동 로직 구현 (FR2)
