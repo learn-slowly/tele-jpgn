@@ -13,6 +13,7 @@ import json
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TODOIST_API_URL = "https://api.todoist.com/rest/v2/tasks" # 이 값은 환경 변수로 할 필요는 없을 수 있습니다.
 TODOIST_API_TOKEN = os.environ.get("TODOIST_API_TOKEN")
+TODOIST_PROJECT_ID = os.environ.get("TODOIST_PROJECT_ID") # 특정 프로젝트 ID
 GOOGLE_CALENDAR_ID = os.environ.get("GOOGLE_CALENDAR_ID", "anVzdGljZWt5dW5nbmFtQGdtYWlsLmNvbQ") # 기본값 설정 가능
 WEATHER_API_URL = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0" # 고정값
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
@@ -159,23 +160,26 @@ async def get_todoist_tasks(date_type: str):
     korea_tz = pytz.timezone('Asia/Seoul')
     now = datetime.datetime.now(korea_tz)
     
+    # 프로젝트 ID를 필터에 추가
+    project_filter = f" & project_id:{TODOIST_PROJECT_ID}" if TODOIST_PROJECT_ID else ""
+    
     # 날짜 설정
     if date_type == "오늘":
         due_date = now.strftime("%Y-%m-%d")
-        filter_param = f"due:today"
+        filter_param = f"due:today{project_filter}"
         title = "오늘"
     elif date_type == "내일":
         tomorrow = now + datetime.timedelta(days=1)
         due_date = tomorrow.strftime("%Y-%m-%d")
-        filter_param = f"due:tomorrow"
+        filter_param = f"due:tomorrow{project_filter}"
         title = "내일"
     elif date_type == "이번주":
-        filter_param = f"due:today day {now.strftime('%Y-%m-%d')} +7 days"
+        filter_param = f"due:today day {now.strftime('%Y-%m-%d')} +7 days{project_filter}"
         title = "이번 주"
     elif date_type == "다음주":
         next_week_start = now + datetime.timedelta(days=7-now.weekday())
         next_week_end = next_week_start + datetime.timedelta(days=6)
-        filter_param = f"due:after:{now.strftime('%Y-%m-%d')} & due:before:{next_week_end.strftime('%Y-%m-%d')}"
+        filter_param = f"due:after:{now.strftime('%Y-%m-%d')} & due:before:{next_week_end.strftime('%Y-%m-%d')}{project_filter}"
         title = "다음 주"
     else:
         return "알 수 없는 기간입니다."
