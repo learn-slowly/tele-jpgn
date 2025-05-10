@@ -160,26 +160,34 @@ async def get_todoist_tasks(date_type: str):
     korea_tz = pytz.timezone('Asia/Seoul')
     now = datetime.datetime.now(korea_tz)
     
-    # 프로젝트 ID를 필터에 추가
-    project_filter = f" & project_id:{TODOIST_PROJECT_ID}" if TODOIST_PROJECT_ID else ""
-    
-    # 날짜 설정
+    # 날짜 설정 및 필터 구성
     if date_type == "오늘":
-        due_date = now.strftime("%Y-%m-%d")
-        filter_param = f"due:today{project_filter}"
+        if TODOIST_PROJECT_ID:
+            filter_param = f"today & project_id:{TODOIST_PROJECT_ID}"
+        else:
+            filter_param = "today"
         title = "오늘"
     elif date_type == "내일":
-        tomorrow = now + datetime.timedelta(days=1)
-        due_date = tomorrow.strftime("%Y-%m-%d")
-        filter_param = f"due:tomorrow{project_filter}"
+        if TODOIST_PROJECT_ID:
+            filter_param = f"tomorrow & project_id:{TODOIST_PROJECT_ID}"
+        else:
+            filter_param = "tomorrow"
         title = "내일"
     elif date_type == "이번주":
-        filter_param = f"due:today day {now.strftime('%Y-%m-%d')} +7 days{project_filter}"
+        # 주간 필터는 문법이 복잡해서 다른 방식으로 처리
+        end_date = (now + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        if TODOIST_PROJECT_ID:
+            filter_param = f"(due:today | due:>today due:before {end_date}) & project_id:{TODOIST_PROJECT_ID}"
+        else:
+            filter_param = f"due:today | due:>today due:before {end_date}"
         title = "이번 주"
     elif date_type == "다음주":
         next_week_start = now + datetime.timedelta(days=7-now.weekday())
         next_week_end = next_week_start + datetime.timedelta(days=6)
-        filter_param = f"due:after:{now.strftime('%Y-%m-%d')} & due:before:{next_week_end.strftime('%Y-%m-%d')}{project_filter}"
+        if TODOIST_PROJECT_ID:
+            filter_param = f"(due:>={next_week_start.strftime('%Y-%m-%d')} & due:<={next_week_end.strftime('%Y-%m-%d')}) & project_id:{TODOIST_PROJECT_ID}"
+        else:
+            filter_param = f"due:>={next_week_start.strftime('%Y-%m-%d')} & due:<={next_week_end.strftime('%Y-%m-%d')}"
         title = "다음 주"
     else:
         return "알 수 없는 기간입니다."
