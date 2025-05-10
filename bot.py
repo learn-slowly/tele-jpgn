@@ -8,6 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import requests
 import json
+import xml.etree.ElementTree as ET
 
 # PRD에서 가져온 API 키 및 설정값 (Heroku Config Vars 사용 권장)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -233,10 +234,199 @@ async def get_todoist_tasks(date_type: str):
         logger.error(f"Todoist 작업 목록 조회 중 오류 발생: {e}")
         return f"Todoist 정보를 가져오는 중 오류가 발생했습니다: {str(e)}"
 
+# 기상청 동네예보 좌표
+WEATHER_LOCATIONS = {
+    "경상남도 창원시 성산구": {"nx": 91, "ny": 77},  # 창원시 성산구 좌표
+    "서울특별시 강남구": {"nx": 61, "ny": 126},      # 강남구 좌표
+    "부산광역시 해운대구": {"nx": 99, "ny": 75},     # 해운대구 좌표
+    "제주특별자치도 제주시": {"nx": 53, "ny": 38},   # 제주시 좌표
+}
+
+# 날씨 코드에 대한 설명
+WEATHER_DESCRIPTION = {
+    "맑음": "☀️ 맑음",
+    "구름많음": "⛅ 구름많음",
+    "흐림": "☁️ 흐림",
+    "비": "🌧️ 비",
+    "비/눈": "🌨️ 비/눈",
+    "눈": "❄️ 눈",
+    "소나기": "🌦️ 소나기",
+    "천둥번개": "⛈️ 천둥번개",
+    "안개": "🌫️ 안개",
+    "박무": "🌫️ 박무"
+}
+
 async def get_weather_forecast(location: str):
-    # TODO: 날씨 API 연동 로직 구현 (FR3)
-    logger.info(f"날씨 정보 요청: {location}")
-    return f"[임시] {location}의 날씨 정보입니다."
+    try:
+        # 기상청 API에 필요한 키가 설정되어 있는지 확인
+        if not WEATHER_API_KEY:
+            return "날씨 API 키가 설정되지 않았습니다. 관리자에게 문의하세요."
+        
+        # 위치 좌표 확인
+        coords = WEATHER_LOCATIONS.get(location)
+        if not coords:
+            # 기본 위치로 대체
+            default_location = "경상남도 창원시 성산구"
+            coords = WEATHER_LOCATIONS.get(default_location)
+            if not coords:
+                return f"날씨 정보를 제공할 수 없는 지역입니다. 좌표 정보가 누락되었습니다."
+            location = default_location
+        
+        # 현재 날짜와 시간 정보
+        now = datetime.datetime.now(pytz.timezone('Asia/Seoul'))
+        base_date = now.strftime("%Y%m%d")  # 오늘 날짜 YYYYMMDD 형식
+        
+        # 현재 시간에 따라 기준 시간 설정 (API 요구사항)
+        if now.hour < 2 or (now.hour == 2 and now.minute < 10):
+            # 00:00~02:10 이전은 전날 23시 데이터 사용
+            base_time = "2300"
+            base_date = (now - datetime.timedelta(days=1)).strftime("%Y%m%d")
+        elif now.hour < 5 or (now.hour == 5 and now.minute < 10):
+            # 02:10~05:10 이전은 당일 02시 데이터 사용
+            base_time = "0200"
+        elif now.hour < 8 or (now.hour == 8 and now.minute < 10):
+            # 05:10~08:10 이전은 당일 05시 데이터 사용
+            base_time = "0500"
+        elif now.hour < 11 or (now.hour == 11 and now.minute < 10):
+            # 08:10~11:10 이전은 당일 08시 데이터 사용
+            base_time = "0800"
+        elif now.hour < 14 or (now.hour == 14 and now.minute < 10):
+            # 11:10~14:10 이전은 당일 11시 데이터 사용
+            base_time = "1100"
+        elif now.hour < 17 or (now.hour == 17 and now.minute < 10):
+            # 14:10~17:10 이전은 당일 14시 데이터 사용
+            base_time = "1400"
+        elif now.hour < 20 or (now.hour == 20 and now.minute < 10):
+            # 17:10~20:10 이전은 당일 17시 데이터 사용
+            base_time = "1700"
+        elif now.hour < 23 or (now.hour == 23 and now.minute < 10):
+            # 20:10~23:10 이전은 당일 20시 데이터 사용
+            base_time = "2000"
+        else:
+            # 23:10~24:00은 당일 23시 데이터 사용
+            base_time = "2300"
+        
+        logger.info(f"날씨 정보 요청: {location} (좌표: {coords}, 기준일시: {base_date} {base_time})")
+        
+        # 기상청 API 호출
+        url = f"{WEATHER_API_URL}/getVilageFcst"
+        params = {
+            'serviceKey': WEATHER_API_KEY,
+            'pageNo': '1',
+            'numOfRows': '1000',
+            'dataType': 'JSON',
+            'base_date': base_date,
+            'base_time': base_time,
+            'nx': coords['nx'],
+            'ny': coords['ny']
+        }
+        
+        response = requests.get(url, params=params)
+        
+        if response.status_code != 200:
+            logger.error(f"날씨 API 오류: {response.status_code}, {response.text}")
+            return f"날씨 정보를 가져오는 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+        
+        # 응답 데이터 분석
+        try:
+            data = response.json()
+            if data['response']['header']['resultCode'] != '00':
+                return f"날씨 정보를 가져오는 중 오류가 발생했습니다: {data['response']['header']['resultMsg']}"
+            
+            items = data['response']['body']['items']['item']
+            
+            # 날씨 정보 정리
+            weather_data = {}
+            forecast_date = (now + datetime.timedelta(days=1)).strftime("%Y%m%d")  # 내일 날짜
+            
+            # 오늘과 내일의 데이터로 분류
+            today_data = {}
+            tomorrow_data = {}
+            
+            for item in items:
+                if item['fcstDate'] == base_date:  # 오늘
+                    if item['fcstTime'] not in today_data:
+                        today_data[item['fcstTime']] = {}
+                    today_data[item['fcstTime']][item['category']] = item['fcstValue']
+                elif item['fcstDate'] == forecast_date:  # 내일
+                    if item['fcstTime'] not in tomorrow_data:
+                        tomorrow_data[item['fcstTime']] = {}
+                    tomorrow_data[item['fcstTime']][item['category']] = item['fcstValue']
+            
+            # 결과 메시지 구성
+            result = f"[{location} 날씨 정보]\n\n"
+            
+            # 오늘 날씨
+            result += "🌡️ 오늘 날씨\n"
+            today_times = ["0900", "1200", "1500", "1800", "2100"]  # 주요 시간대
+            for time in today_times:
+                if time in today_data:
+                    temp = today_data[time].get('TMP', '-')  # 기온
+                    sky = today_data[time].get('SKY', '-')   # 하늘상태
+                    pty = today_data[time].get('PTY', '0')   # 강수형태
+                    pop = today_data[time].get('POP', '0')   # 강수확률
+                    
+                    # 하늘상태 변환
+                    sky_text = "맑음" if sky == '1' else "구름많음" if sky == '3' else "흐림" if sky == '4' else "알 수 없음"
+                    
+                    # 강수형태 변환
+                    if pty == '1':
+                        weather_text = "비"
+                    elif pty == '2':
+                        weather_text = "비/눈"
+                    elif pty == '3':
+                        weather_text = "눈"
+                    elif pty == '4':
+                        weather_text = "소나기"
+                    else:
+                        weather_text = sky_text
+                    
+                    # 이모지 추가
+                    weather_emoji = WEATHER_DESCRIPTION.get(weather_text, weather_text)
+                    
+                    time_formatted = f"{time[:2]}:{time[2:]}"
+                    result += f"• {time_formatted}: {weather_emoji}, {temp}°C, 강수확률 {pop}%\n"
+            
+            # 내일 날씨
+            result += "\n🌡️ 내일 날씨\n"
+            tomorrow_times = ["0900", "1200", "1500", "1800", "2100"]  # 주요 시간대
+            for time in tomorrow_times:
+                if time in tomorrow_data:
+                    temp = tomorrow_data[time].get('TMP', '-')  # 기온
+                    sky = tomorrow_data[time].get('SKY', '-')   # 하늘상태
+                    pty = tomorrow_data[time].get('PTY', '0')   # 강수형태
+                    pop = tomorrow_data[time].get('POP', '0')   # 강수확률
+                    
+                    # 하늘상태 변환
+                    sky_text = "맑음" if sky == '1' else "구름많음" if sky == '3' else "흐림" if sky == '4' else "알 수 없음"
+                    
+                    # 강수형태 변환
+                    if pty == '1':
+                        weather_text = "비"
+                    elif pty == '2':
+                        weather_text = "비/눈"
+                    elif pty == '3':
+                        weather_text = "눈"
+                    elif pty == '4':
+                        weather_text = "소나기"
+                    else:
+                        weather_text = sky_text
+                    
+                    # 이모지 추가
+                    weather_emoji = WEATHER_DESCRIPTION.get(weather_text, weather_text)
+                    
+                    time_formatted = f"{time[:2]}:{time[2:]}"
+                    result += f"• {time_formatted}: {weather_emoji}, {temp}°C, 강수확률 {pop}%\n"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"날씨 데이터 처리 중 오류 발생: {e}")
+            return f"날씨 정보를 처리하는 중 오류가 발생했습니다: {str(e)}"
+            
+    except Exception as e:
+        logger.error(f"날씨 정보 요청 중 오류 발생: {e}")
+        return f"날씨 정보를 가져오는 중 오류가 발생했습니다: {str(e)}"
 
 # --- 명령어 핸들러 함수들 ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR5.1
