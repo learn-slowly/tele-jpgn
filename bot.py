@@ -71,10 +71,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # FR
     **jpgn_21_bot 사용법 안내**
 
     **정보 조회 (수동)**
-    /오늘 - 오늘 일정, 할 일, 날씨
-    /내일 - 내일 일정, 할 일, 날씨
-    /이번주 - 이번 주 일정 및 할 일
-    /다음주 - 다음 주 일정 및 할 일
+    /today - 오늘 일정, 할 일, 날씨
+    /tomorrow - 내일 일정, 할 일, 날씨
+    /thisweek - 이번 주 일정 및 할 일
+    /nextweek - 다음 주 일정 및 할 일
 
     **자동 알림 설정**
     /set_morning_briefing_time HH:MM - 아침 브리핑 시간 설정 (예: /set_morning_briefing_time 08:00)
@@ -209,10 +209,10 @@ def main() -> None:
     application.add_handler(CommandHandler("set_weather_location", set_weather_location))
     application.add_handler(CommandHandler("set_morning_briefing_time", set_morning_briefing_time))
     application.add_handler(CommandHandler("set_evening_briefing_time", set_evening_briefing_time))
-    application.add_handler(CommandHandler("오늘", today_command))
-    application.add_handler(CommandHandler("내일", tomorrow_command))
-    application.add_handler(CommandHandler("이번주", this_week_command))
-    application.add_handler(CommandHandler("다음주", next_week_command))
+    application.add_handler(CommandHandler("today", today_command))
+    application.add_handler(CommandHandler("tomorrow", tomorrow_command))
+    application.add_handler(CommandHandler("thisweek", this_week_command))
+    application.add_handler(CommandHandler("nextweek", next_week_command))
 
     # 자동 알림 (Job Queue 사용 예시 - 실제 구현 시 chat_id 관리 및 정확한 시간 설정 필요)
     # job_queue = application.job_queue
