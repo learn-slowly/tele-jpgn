@@ -6,6 +6,8 @@ import datetime
 import pytz
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import requests
+import json
 
 # PRD에서 가져온 API 키 및 설정값 (Heroku Config Vars 사용 권장)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -145,17 +147,79 @@ async def get_google_calendar_events(date_type: str):
         return f"구글 캘린더 정보를 가져오는 중 오류가 발생했습니다: {str(e)}"
 
 async def get_todoist_tasks(date_type: str):
-    # TODO: Todoist API 연동 로직 구현 (FR2)
-    logger.info(f"Todoist 작업 정보 요청: {date_type}")
+    if not TODOIST_API_TOKEN:
+        return "Todoist API 토큰이 설정되지 않았습니다. 관리자에게 문의하세요."
+    
+    headers = {
+        "Authorization": f"Bearer {TODOIST_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # 한국 시간대 설정
+    korea_tz = pytz.timezone('Asia/Seoul')
+    now = datetime.datetime.now(korea_tz)
+    
+    # 날짜 설정
     if date_type == "오늘":
-        return f"[임시] 오늘의 Todoist 작업 목록입니다."
+        due_date = now.strftime("%Y-%m-%d")
+        filter_param = f"due:today"
+        title = "오늘"
     elif date_type == "내일":
-        return f"[임시] 내일의 Todoist 작업 목록입니다."
+        tomorrow = now + datetime.timedelta(days=1)
+        due_date = tomorrow.strftime("%Y-%m-%d")
+        filter_param = f"due:tomorrow"
+        title = "내일"
     elif date_type == "이번주":
-        return f"[임시] 이번 주 Todoist 작업 목록입니다."
+        filter_param = f"due:today day {now.strftime('%Y-%m-%d')} +7 days"
+        title = "이번 주"
     elif date_type == "다음주":
-        return f"[임시] 다음 주 Todoist 작업 목록입니다."
-    return "알 수 없는 기간입니다."
+        next_week_start = now + datetime.timedelta(days=7-now.weekday())
+        next_week_end = next_week_start + datetime.timedelta(days=6)
+        filter_param = f"due:after:{now.strftime('%Y-%m-%d')} & due:before:{next_week_end.strftime('%Y-%m-%d')}"
+        title = "다음 주"
+    else:
+        return "알 수 없는 기간입니다."
+    
+    try:
+        logger.info(f"Todoist 작업 정보 요청: {date_type} (필터: {filter_param})")
+        
+        # Todoist API를 호출하여 작업 목록 가져오기
+        response = requests.get(
+            f"{TODOIST_API_URL}",
+            headers=headers,
+            params={"filter": filter_param}
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Todoist API 오류: {response.status_code}, {response.text}")
+            return f"Todoist API 요청 중 오류가 발생했습니다. 상태 코드: {response.status_code}"
+        
+        tasks = response.json()
+        
+        if not tasks:
+            return f"{title} 예정된 작업이 없습니다."
+        
+        # 작업 정보 포맷팅
+        task_list = []
+        for task in tasks:
+            due_date = task.get('due', {})
+            due_str = due_date.get('date', '날짜 없음') if due_date else '날짜 없음'
+            
+            # ISO 날짜 형식을 보기 쉬운 형태로 변환
+            if due_str and due_str != '날짜 없음' and 'T' in due_str:
+                due_datetime = datetime.datetime.fromisoformat(due_str.replace('Z', '+00:00')).astimezone(korea_tz)
+                due_str = due_datetime.strftime('%Y-%m-%d %H:%M')
+            
+            priority = task.get('priority', 1)
+            priority_marker = "🔴" if priority == 4 else "🟠" if priority == 3 else "🟡" if priority == 2 else "⚪"
+            
+            task_list.append(f"{priority_marker} {task['content']} (마감: {due_str})")
+        
+        return "\n".join(task_list)
+    
+    except Exception as e:
+        logger.error(f"Todoist 작업 목록 조회 중 오류 발생: {e}")
+        return f"Todoist 정보를 가져오는 중 오류가 발생했습니다: {str(e)}"
 
 async def get_weather_forecast(location: str):
     # TODO: 날씨 API 연동 로직 구현 (FR3)
